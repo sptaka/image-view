@@ -85,9 +85,6 @@ namespace SampleViewer.Services
 
         public async Task<bool> CheckFirstTimeAndCreateLocalEnvAsync(IProgress<ProgressInfo> progress)
         {
-            //settingsフォルダの有無で判断
-            //SampleViewer内フォルダのクリーンアップ作業
-            //settingsファイルコピー、versionファイルコピー、各フォルダの構築
             return await Task.Run(() =>
             {
                 var paths = PathFactory.Create();
@@ -194,8 +191,7 @@ namespace SampleViewer.Services
             return systemStatus;
         }
 
-        // 選択中の方式が使えず、もう一方が使える場合は切り替える（画像PCはローカル固定なので対象外）
-        // 切り替えた場合は true
+
         public static bool ApplyAccessModeFallback(Settings settings, SystemStatus status)
         {
             var user = settings.User;
