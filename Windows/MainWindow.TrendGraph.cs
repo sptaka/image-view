@@ -84,7 +84,6 @@ namespace SampleViewer.Windows
                 .ToList();
         }
 
-        // 対象耐久のデータを取得し直してグラフを作り直す
         private void RefreshTrendGraph()
         {
             var graphs = CreateTrendGraphItems();
@@ -149,10 +148,7 @@ namespace SampleViewer.Windows
             return (minX, maxX, minYLeft, maxYLeft, minYRight, maxYRight);
         }
 
-        // 特徴量はパターン固有なので、候補をパターンで絞る
-        // パターンは「検索条件のパターン」→「選択中の画像のパターン」の順に決め、どちらも無ければ全特徴量
-        // selectFirst=true（画像を選んだとき）は、特徴量が未選択か候補に無ければ先頭の特徴量を選ぶ
-        // 戻り値：選択中の特徴量が変わったか
+
         private bool UpdateFeatureList(bool selectFirst)
         {
             string? searchPattern = CB_SamplePatternTop.SelectedItem?.ToString();
@@ -212,8 +208,7 @@ namespace SampleViewer.Windows
 
         #region 描画
 
-        // グラフが少なければ領域を等分して埋め、多ければ最小の高さを保って縦スクロールにする
-        // 1件だけのときは縦長になりすぎないよう、2件のときと同じ高さにする
+
         private void UpdateTrendGraphHeight()
         {
             int count = (IC_TrendGraphs.ItemsSource as IList<TrendGraphItem>)?.Count ?? 0;
@@ -427,7 +422,7 @@ namespace SampleViewer.Windows
             UpdateViewBand(canvas);
         }
 
-        // 現像器を交換した位置に緑の縦破線と「TN3」などのラベルを描く（マーカーより背面）
+
         private static void DrawDeveloperChanges(Canvas canvas, TrendGraphItem graph, Func<double, double> toX, double top, double height)
         {
             var brush = Brushes.ForestGreen;
