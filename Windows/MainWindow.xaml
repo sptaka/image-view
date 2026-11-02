@@ -121,9 +121,9 @@
                                     <TextBlock Text="ID・シリアル検索" Style="{StaticResource PaneSectionTitle}"/>
                                     <TextBlock Text="耐久ID・評価目的で絞り込み（Enterで選択）" Style="{StaticResource PaneFieldLabel}"/>
                                     <TextBox x:Name="TB_TaikyuCode" Height="28" Margin="0,0,0,8" KeyDown="TB_TaikyuCode_KeyDown" TextChanged="TB_TaikyuCode_TextChanged"/>
-                                    <TextBlock Text="シリアル番号で絞り込み（現像器・ドラム・本体）" Style="{StaticResource PaneFieldLabel}"/>
+                                    <TextBlock Text="シリアル番号で絞り込み（）" Style="{StaticResource PaneFieldLabel}"/>
                                     <TextBox x:Name="TB_SerialNo" Height="28" KeyDown="TB_SerialNo_KeyDown" TextChanged="TB_SerialNo_TextChanged"
-                                             ToolTip="現像器(TN1～4)・ドラム(DRM1～4)・本体のシリアル番号の一部で耐久を絞り込みます。&#10;ハイフン・空白・大文字小文字の違いは無視します"/>
+                                             ToolTip="シリアル番号の一部で耐久を絞り込みます。&#10;ハイフン・空白・大文字小文字の違いは無視します"/>
                                 </StackPanel>
                             </Border>
 
