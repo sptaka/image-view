@@ -2,18 +2,7 @@ using SampleViewer.Models;
 
 namespace SampleViewer.Services
 {
-    /// <summary>
-    /// 耐久比較の各行（耐久ごとの画像リスト）を、表示モードに応じたマスの並びに変換する。
-    ///
-    /// ・独立モード：各行を枚数順に並べるだけ
-    /// ・シンクロモード：全行の枚数の和集合を共通の軸とし、各行は軸の各点に
-    ///   「同じ枚数の画像」→「許容差以内で最も近い枚数の画像（近似）」→「該当なし」を置く。
-    ///   全行の長さが揃うため、同じスクロール位置で同じ枚数が並ぶ。
-    /// ・共通枚数のみ：全行に存在する（枚数, パターン）の画像だけを残す（両モード共通）
-    ///
-    /// 同じ枚数に複数パターンがある場合を考慮し、軸のキーは（枚数, パターン, 同一キー内の連番）とする。
-    /// 枚数が未登録の画像はシンクロモードでは揃えようがないため除外する。
-    /// </summary>
+
     public static class CompareAligner
     {
         private readonly record struct SlotKey(double Pages, string Pattern, int Occurrence);
