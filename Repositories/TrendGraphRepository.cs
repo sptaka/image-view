@@ -169,8 +169,7 @@ ORDER BY
 
         return result;
     }
-    // 耐久ごとに、現像器（TN1～TN4）のシリアルが変わった枚数を返す
-    // シリアル未入力の測定は「不明」として扱い、交換とはみなさない
+
     public Dictionary<string, List<DeveloperChange>> GetDeveloperChanges(IEnumerable<string> taikyuCodes)
     {
         const string sql = @"
@@ -232,7 +231,7 @@ ORDER BY m.pages, m.measurement_id
         return result;
     }
 
-    // パターンを指定した場合は、そのパターン固有の特徴量だけを返す（feature_id 順＝登録順）
+
     public List<string> GetFeatureNames(string? patternName = null)
     {
         string sql = string.IsNullOrWhiteSpace(patternName)
