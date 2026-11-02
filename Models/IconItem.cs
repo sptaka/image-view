@@ -10,7 +10,6 @@
 
         public string ImageId { get; set; } = "";
 
-        // 新DB用
         public string ImageName { get; set; } = "";
 
         public string DurabilityId { get; set; } = "";
@@ -21,7 +20,6 @@
 
         public string Item3 { get; set; } = "";
 
-        // 印字枚数（耐久比較で行を揃える基準）
         public double? Pages { get; set; }
 
         // トレンドグラフの測定値の点（1測定に1点）と対応づける
