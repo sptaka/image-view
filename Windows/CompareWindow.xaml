@@ -1,0 +1,58 @@
+﻿<Window x:Class="SampleViewer.Windows.CompareWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:SampleViewer"
+        mc:Ignorable="d"
+        Title="CompareWindow" Height="1000" Width="1600"
+        WindowStartupLocation="CenterScreen"
+        AllowDrop="True"
+        Drop="Window_Drop">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Themes/Modern.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+            <Style x:Key="LevelSlider" TargetType="Slider">
+                <Setter Property="Width" Value="110"/>
+                <Setter Property="Minimum" Value="0"/>
+                <Setter Property="Maximum" Value="255"/>
+                <Setter Property="TickFrequency" Value="1"/>
+                <Setter Property="IsSnapToTickEnabled" Value="True"/>
+                <Setter Property="VerticalAlignment" Value="Center"/>
+            </Style>
+        </ResourceDictionary>
+    </Window.Resources>
+    <DockPanel>
+        <WrapPanel DockPanel.Dock="Top" Margin="8,8,8,0">
+            <Button Content="Fit" Width="80" Margin="0,0,8,4" Click="Fit_Click" ToolTip="ズームと位置を戻します（画像ごとのズレは維持）"/>
+            <Button Content="Reset" Width="80" Margin="0,0,8,4" Click="Reset_Click" ToolTip="ズーム・位置・画像ごとのズレをすべて戻します"/>
+            <Button Content="ズレをリセット" Margin="0,0,8,4" Click="ResetOffsets_Click" ToolTip="画像ごとのズレだけを戻します（1枚だけ戻すときは画像を右クリック）"/>
+            <CheckBox x:Name="CB_ShowLabels" Content="ラベル" IsChecked="True" VerticalAlignment="Center" Margin="4,0,0,4"
+                      Checked="ShowLabels_Changed" Unchecked="ShowLabels_Changed"/>
+            <TextBlock x:Name="ZoomText" Margin="12,0,0,4" VerticalAlignment="Center" Text="Zoom: 1.00x"/>
+            <TextBlock Margin="12,0,0,4" VerticalAlignment="Center"
+                 Text="（ドラッグでパン、Ctrl＋ドラッグでその画像だけパン、ホイールでズーム、ドラッグ＆ドロップで追加）"/>
+        </WrapPanel>
+        <WrapPanel DockPanel.Dock="Top" Margin="8,0,8,4">
+            <TextBlock Text="黒レベル" Style="{StaticResource ToolbarLabel}"/>
+            <Slider x:Name="SL_Black" Style="{StaticResource LevelSlider}" Value="0" ValueChanged="Adjust_Changed"
+                    ToolTip="この輝度以下を黒にします。上げると白に近い部分の差が見やすくなります"/>
+            <TextBlock Text="{Binding Value, ElementName=SL_Black}" Width="28" Margin="6,0,12,0" VerticalAlignment="Center"/>
+            <TextBlock Text="白レベル" Style="{StaticResource ToolbarLabel}"/>
+            <Slider x:Name="SL_White" Style="{StaticResource LevelSlider}" Value="255" ValueChanged="Adjust_Changed"
+                    ToolTip="この輝度以上を白にします"/>
+            <TextBlock Text="{Binding Value, ElementName=SL_White}" Width="28" Margin="6,0,12,0" VerticalAlignment="Center"/>
+            <Button Content="白地を強調" Margin="0,0,8,0" Click="EmphasizeWhite_Click" ToolTip="白に近い範囲（輝度200～255）を引き伸ばして、白地のかぶりを見やすくします"/>
+            <CheckBox x:Name="CB_Highlight" Content="濃度が閾値以上を色付け" VerticalAlignment="Center" Margin="8,0,8,0"
+                      Checked="Adjust_Changed" Unchecked="Adjust_Changed"
+                      ToolTip="濃度（255－輝度）が閾値以上の部分をマゼンタで塗ります。判定は元画像の値で行います"/>
+            <Slider x:Name="SL_Threshold" Style="{StaticResource LevelSlider}" Minimum="1" Value="16" ValueChanged="Adjust_Changed"/>
+            <TextBlock Text="{Binding Value, ElementName=SL_Threshold}" Width="28" Margin="6,0,12,0" VerticalAlignment="Center"/>
+            <Button Content="調整を戻す" Click="ResetAdjust_Click"/>
+        </WrapPanel>
+
+        <UniformGrid x:Name="TilesGrid" Rows="2" Columns="2" Margin="4"/>
+    </DockPanel>
+</Window>

@@ -442,35 +442,39 @@ namespace SampleViewer.Windows
 
         private List<CompareItem> CreateCompareItems(IEnumerable<IconItem> selectedItems)
         {
+            return CreateCompareItems(selectedItems
+                .Where(x => !string.IsNullOrWhiteSpace(x.ImagePath))
+                .Select(x => (x.DurabilityId, x.ImageName, x.Pages, x.Pattern)));
+        }
+
+        private List<CompareItem> CreateCompareItems(
+            IEnumerable<(string DurabilityId, string ImageName, double? Pages, string Pattern)> images)
+        {
             var imagePathService = new ImagePathService(settings);
 
-            var items = new List<CompareItem>();
+            var list = images.ToList();
+            var infos = SearchService.GetDurabilityInfo(list.Select(x => x.DurabilityId).Distinct());
 
-            foreach (var icon in selectedItems)
-            {
-                if (string.IsNullOrWhiteSpace(icon.ImagePath))
-                    continue;
+            return list
+                .Select(x =>
+                {
+                    var info = infos.GetValueOrDefault(x.DurabilityId);
 
-                string durabilityId = icon.DurabilityId;
-
-                string imageName = icon.ImageName;
-
-                string sourcePath =
-                    imagePathService.GetSourcePath(
-                        durabilityId,
-                        imageName);
-
-                items.Add(
-                    new CompareItem
+                    return new CompareItem
                     {
                         Key = Guid.NewGuid().ToString(),
-                        DisplayName = imageName,
-                        SourcePath = sourcePath
-                    });
-            }
-
-            return items;
-        }   
+                        DisplayName = x.ImageName,
+                        SourcePath = imagePathService.GetSourcePath(x.DurabilityId, x.ImageName),
+                        DurabilityId = x.DurabilityId,
+                        Pages = x.Pages,
+                        Pattern = x.Pattern,
+                        Env = info.Env ?? "",
+                        Model = info.Model ?? "",
+                        Purpose = info.Purpose ?? ""
+                    };
+                })
+                .ToList();
+        }
 
         private void ClearResponseFolder()
         {
@@ -519,12 +523,7 @@ namespace SampleViewer.Windows
             _compare.Show();
             _compare.Activate();
 
-            var paths = items
-                .Select(x => x.SourcePath)
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .ToList();
-
-            _compare.AddImages(paths);
+            _compare.AddItems(items);
         }
 
         private void StartCompareWatcher()
@@ -601,6 +600,8 @@ namespace SampleViewer.Windows
                         DurabilityId = durabilityId,
                         ImageId = imageId,
                         ImageName = icon.ImageName,
+                        Pages = icon.Pages,
+                        Pattern = icon.Pattern,
                         Item1 = icon.Item1,
                         Item2 = icon.Item2,
                         Item3 = icon.Item3
@@ -615,21 +616,8 @@ namespace SampleViewer.Windows
 
         private void ShowCompareTargetWindow_Click( object sender, RoutedEventArgs e)
         {
-            var imagePathService =
-                new ImagePathService(settings);
-
-            var items = CompareTargets
-                .Select(x => new CompareItem
-                {
-                    Key = Guid.NewGuid().ToString(),
-                    DisplayName = x.ImageName,
-                    SourcePath = imagePathService.GetSourcePath(
-                        x.DurabilityId,
-                        x.ImageName)
-                })
-                .ToList();
-
-            OpenCompareWindow(items);
+            OpenCompareWindow(CreateCompareItems(
+                CompareTargets.Select(x => (x.DurabilityId, x.ImageName, x.Pages, x.Pattern))));
         }
 
         #endregion
