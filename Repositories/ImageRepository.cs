@@ -136,16 +136,16 @@ ORDER BY t.taikyu_code
         return result;
     }
 
-    // 耐久IDごとの環境と機種（メーカー＋機種名）
-    public Dictionary<string, (string Env, string Model)> GetDurabilityInfo(IEnumerable<string> taikyuCodes)
+    // 耐久IDごとの環境・機種（メーカー＋機種名）・評価目的
+    public Dictionary<string, (string Env, string Model, string Purpose)> GetDurabilityInfo(IEnumerable<string> taikyuCodes)
     {
         const string sql = @"
-SELECT env, maker, model_name
+SELECT env, maker, model_name, purpose_name
 FROM taikyu
 WHERE taikyu_code = @taikyuCode
 ";
 
-        var result = new Dictionary<string, (string Env, string Model)>();
+        var result = new Dictionary<string, (string Env, string Model, string Purpose)>();
 
         using var conn = DbHelper.OpenConnection();
 
@@ -165,7 +165,7 @@ WHERE taikyu_code = @taikyuCode
                     .Where(x => !string.IsNullOrWhiteSpace(x))
                     .Select(x => x!.Trim()));
 
-            result[taikyuCode] = (env, model);
+            result[taikyuCode] = (env, model, reader["purpose_name"]?.ToString() ?? "");
         }
 
         return result;
@@ -250,7 +250,7 @@ SELECT
 {BaseFromClause}
 WHERE 1=1
 {whereClause}
-ORDER BY t.taikyu_code, m.pages, m.measurement_id, p.""order"", i.image_id
+ORDER BY t.taikyu_code, m.pages, i.image_id
 LIMIT @limit
 ";
 
