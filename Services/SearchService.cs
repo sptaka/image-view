@@ -36,7 +36,7 @@ namespace SampleViewer.Services
             return new ImageRepository().GetDurabilitySerials();
         }
 
-        public static Dictionary<string, (string Env, string Model)> GetDurabilityInfo(IEnumerable<string> taikyuCodes)
+        public static Dictionary<string, (string Env, string Model, string Purpose)> GetDurabilityInfo(IEnumerable<string> taikyuCodes)
         {
             return new ImageRepository().GetDurabilityInfo(taikyuCodes);
         }
