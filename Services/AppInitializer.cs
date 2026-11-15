@@ -18,45 +18,39 @@ namespace SampleViewer.Services
         public Models.Settings LoadSettings()
         {
             var paths = PathFactory.Create();
+            // 配布される設定はアプリのフォルダから直接読む（コピーを持たないので、古い設定が残らない）
             var server = SettingsService.Load<ServerSettings>(paths.ServerSettingsPath);
-            var user = SettingsService.Load<UserSettings>(paths.UserSettingsPath);
 
-            // =============================
-            // ServerSettings Version確認
-            // =============================
-            var defaultServer = SettingsService.Load<ServerSettings>(
-                    Path.Combine(paths.ExeSettingsDir,"serverSettings.json"));
-
-            if (server.SettingsVersion != defaultServer.SettingsVersion)
-            {
-                File.Copy(Path.Combine(paths.ExeSettingsDir, "serverSettings.json"), paths.ServerSettingsPath, true);
-                server =SettingsService.Load<ServerSettings>( paths.ServerSettingsPath);
-            }
-
-            // =============================
-            // UserSettings Version確認
-            // =============================
-            var defaultUser =SettingsService.Load<UserSettings>(Path.Combine( paths.ExeSettingsDir, "userSettingsDefault.json"));
-
-            if (user.SettingsVersion !=defaultUser.SettingsVersion)
-            {
-                File.Copy(Path.Combine(paths.ExeSettingsDir, "userSettingsDefault.json"),paths.UserSettingsPath,true);
-
-                user =SettingsService.Load<UserSettings>( paths.UserSettingsPath);
-            }
-
-
-
+            // 個人の設定は、既定値に利用者の設定を重ねて読む（アプリ更新で消さない）
+            var user = SettingsService.LoadWithDefaults<UserSettings>(paths.UserSettingsPath, paths.UserSettingsDefaultPath);
 
             server.serverResponsePath = Path.Combine(server.serverClientPath!, Environment.UserName);
-            //imagePCの場合
             string iconRootPath;
             var isImagePc = Environment.MachineName.Equals(server.ImagePcName,StringComparison.OrdinalIgnoreCase);
-            if (isImagePc)
+
+            // このPCのローカルの画像フォルダ。画像PCは、初回だけ従来の場所を自動で登録する
+            MachineSettings machine;
+
+            if (File.Exists(paths.MachineSettingsPath))
             {
-                user.AccessMode = ImageAccessMode.Local;
+                machine = SettingsService.Load<MachineSettings>(paths.MachineSettingsPath);
             }
-            
+            else
+            {
+                machine = new MachineSettings();
+
+                if (isImagePc)
+                {
+                    machine.LocalLargeImagePath = PathFactory.GetImagePcLargeImagePath(server);
+                    machine.LocalOriginalImagePath = PathFactory.GetImagePcCorrectedImagePath(server);
+                    SettingsService.Save(paths.MachineSettingsPath, machine);
+                }
+            }
+
+            // 「ローカル方式」は廃止（ローカルにあれば自動で使う）。以前の設定はクエリ方式として扱う
+            if (user.AccessMode == ImageAccessMode.Local)
+                user.AccessMode = ImageAccessMode.Query;
+
             iconRootPath = paths.IconsDir;
             
             if (user.IsTestMode) warningMessage = "テストモードで実行中";
@@ -76,6 +70,7 @@ namespace SampleViewer.Services
                 IsImagePc = isImagePc,
                 InstalledIconIds = installedIds,
                 IconRootPath = iconRootPath,
+                Machine = machine,
                 User = user,
                 Server = server,
                 Local = paths
@@ -85,6 +80,9 @@ namespace SampleViewer.Services
 
         public async Task<bool> CheckFirstTimeAndCreateLocalEnvAsync(IProgress<ProgressInfo> progress)
         {
+            //settingsフォルダの有無で判断
+            //SampleViewer内フォルダのクリーンアップ作業
+            //settingsファイルコピー、versionファイルコピー、各フォルダの構築
             return await Task.Run(() =>
             {
                 var paths = PathFactory.Create();
@@ -95,22 +93,12 @@ namespace SampleViewer.Services
                         DirectoryUtils.ClearDirectory(paths.BaseDir);
 
                     Directory.CreateDirectory(paths.SettingsDir);
-                    Directory.CreateDirectory(paths.LogsDir);
-                    Directory.CreateDirectory(paths.IconsDir);
-                    Directory.CreateDirectory(paths.ImageCacheDir);
-                    Directory.CreateDirectory(paths.UploaderDir);
-                    Directory.CreateDirectory(paths.DocsDir);
-                    Directory.CreateDirectory(paths.IconsTemplateDir);
-
-                    var exeDir = paths.ExeSettingsDir;
-                    
-                    File.Copy(Path.Combine(exeDir, "serverSettings.json"), paths.ServerSettingsPath);
-                    File.Copy(Path.Combine(exeDir, "userSettingsDefault.json"), paths.UserSettingsPath);
-
-                    CopyDbUsingBackup(
-                        Path.Combine(exeDir, "IconLocalStateDefault.db"),
-                        paths.IconStateDbPath);
                 }
+
+                // DB・アイコンはPCの全ユーザーで共有する。他のユーザーが用意済みならそのまま使う
+                SharedDataService.Prepare(
+                    paths,
+                    Path.Combine(paths.ExeSettingsDir, "IconLocalStateDefault.db"));
 
                 progress.Report(new ProgressInfo
                 {
@@ -191,7 +179,8 @@ namespace SampleViewer.Services
             return systemStatus;
         }
 
-
+        // 選択中の方式が使えず、もう一方が使える場合は切り替える（画像PCはローカル固定なので対象外）
+        // 切り替えた場合は true
         public static bool ApplyAccessModeFallback(Settings settings, SystemStatus status)
         {
             var user = settings.User;
@@ -281,6 +270,21 @@ namespace SampleViewer.Services
             {
                 await UpdateAppAsync(status, settings, progress);
                 return;
+            }
+
+            // 共有データの更新は1人ずつ行う。他のユーザーが更新中なら終わるのを待つ
+            bool needsDataUpdate = status.needDBUpdate || status.needIconsUpdate || status.needTemplateUpdate;
+
+            using var updateLock = needsDataUpdate
+                ? await SharedDataService.AcquireUpdateLockAsync(settings.Local!)
+                : null;
+
+            if (needsDataUpdate && updateLock == null)
+            {
+                MessageBox.Show("他のユーザーがデータを更新中のため、今回は更新せずに起動します。");
+                status.needDBUpdate = false;
+                status.needIconsUpdate = false;
+                status.needTemplateUpdate = false;
             }
 
             // DB更新

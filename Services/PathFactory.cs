@@ -67,7 +67,11 @@ namespace SampleViewer.Services
 
         public static string GetImagePcLargeImagePath(ServerSettings settings)
         {
-            return Path.Combine(settings.ImagePcRootPath!,settings.LargeImageFolderName!);
+            string root = string.IsNullOrWhiteSpace(settings.ImagePcLargeRootPath)
+                ? settings.ImagePcRootPath!
+                : settings.ImagePcLargeRootPath;
+
+            return Path.Combine(root, settings.LargeImageFolderName!);
         }
         public static LocalPaths Create()
         {
@@ -75,9 +79,14 @@ namespace SampleViewer.Services
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "SampleViewer");
 
+            var sharedDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "SampleViewer");
+
             return new LocalPaths
             {
-                BaseDir = baseDir
+                BaseDir = baseDir,
+                SharedDir = SharedDataService.CanUse(sharedDir) ? sharedDir : ""
             };
         }
 

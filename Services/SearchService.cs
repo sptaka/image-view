@@ -36,6 +36,16 @@ namespace SampleViewer.Services
             return new ImageRepository().GetDurabilitySerials();
         }
 
+        public static List<(double Pages, string ImageName)> GetPatternSeries(string taikyuCode, string patternName)
+        {
+            return new ImageRepository().GetPatternSeries(taikyuCode, patternName);
+        }
+
+        public static (double Min, double Max) GetPagesRange(IReadOnlyList<string> taikyuCodes)
+        {
+            return new ImageRepository().GetPagesRange(taikyuCodes);
+        }
+
         public static Dictionary<string, (string Env, string Model, string Purpose)> GetDurabilityInfo(IEnumerable<string> taikyuCodes)
         {
             return new ImageRepository().GetDurabilityInfo(taikyuCodes);
