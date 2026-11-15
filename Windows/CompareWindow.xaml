@@ -8,7 +8,8 @@
         Title="CompareWindow" Height="1000" Width="1600"
         WindowStartupLocation="CenterScreen"
         AllowDrop="True"
-        Drop="Window_Drop">
+        Drop="Window_Drop"
+        PreviewKeyDown="Window_PreviewKeyDown">
     <Window.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
@@ -29,11 +30,21 @@
             <Button Content="Fit" Width="80" Margin="0,0,8,4" Click="Fit_Click" ToolTip="ズームと位置を戻します（画像ごとのズレは維持）"/>
             <Button Content="Reset" Width="80" Margin="0,0,8,4" Click="Reset_Click" ToolTip="ズーム・位置・画像ごとのズレをすべて戻します"/>
             <Button Content="ズレをリセット" Margin="0,0,8,4" Click="ResetOffsets_Click" ToolTip="画像ごとのズレだけを戻します（1枚だけ戻すときは画像を右クリック）"/>
+            <Button Width="32" Margin="0,0,4,4" Click="PreviousPages_Click" ToolTip="同じパターンの前の枚数へ（← キー）">
+                <Polygon Points="8,0 0,5 8,10" Width="8" Height="10" HorizontalAlignment="Center" VerticalAlignment="Center"
+                      Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+            </Button>
+            <Button Width="32" Margin="0,0,8,4" Click="NextPages_Click" ToolTip="同じパターンの次の枚数へ（→ キー）">
+                <Polygon Points="0,0 8,5 0,10" Width="8" Height="10" HorizontalAlignment="Center" VerticalAlignment="Center"
+                      Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+            </Button>
+            <Button Content="画像をコピー" Margin="0,0,8,4" Click="CopyView_Click" ToolTip="ラベルを含む今の表示を画像としてコピーします（Ctrl+C）"/>
             <CheckBox x:Name="CB_ShowLabels" Content="ラベル" IsChecked="True" VerticalAlignment="Center" Margin="4,0,0,4"
                       Checked="ShowLabels_Changed" Unchecked="ShowLabels_Changed"/>
             <TextBlock x:Name="ZoomText" Margin="12,0,0,4" VerticalAlignment="Center" Text="Zoom: 1.00x"/>
+            <TextBlock x:Name="StatusText" Margin="12,0,0,4" VerticalAlignment="Center" Foreground="{StaticResource BrandBrush}"/>
             <TextBlock Margin="12,0,0,4" VerticalAlignment="Center"
-                 Text="（ドラッグでパン、Ctrl＋ドラッグでその画像だけパン、ホイールでズーム、ドラッグ＆ドロップで追加）"/>
+                 Text="（ドラッグでパン、Ctrl＋ドラッグでその画像だけパン、ホイールでズーム、←→で枚数送り、ドラッグ＆ドロップで追加）"/>
         </WrapPanel>
         <WrapPanel DockPanel.Dock="Top" Margin="8,0,8,4">
             <TextBlock Text="黒レベル" Style="{StaticResource ToolbarLabel}"/>

@@ -3,6 +3,7 @@ using SampleViewer.Services;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -34,6 +35,9 @@ namespace SampleViewer.Windows
             public string Id ="";
             public string Key ="";
             public FrameworkElement Label = null!;
+            public CompareItem Item = null!;
+            public TextBlock? PagesText;
+            public CancellationTokenSource? LoadCts;
             public TextBlock OffsetText = null!;
             public int ImgW; // ピクセル数（CroppedBitmap の座標と揃える）
             public int ImgH;
@@ -49,6 +53,15 @@ namespace SampleViewer.Windows
 
         private static readonly ImageAdjustment NoAdjustment = new(0, 255, false, 16);
         private const int MaxDirectImages = 100;
+
+        // 枚数送り：同じ耐久・同じパターンの画像一覧を返す／移動先の画像の読み込みを依頼する
+        public Func<CompareItem, IReadOnlyList<CompareItem>>? SeriesProvider { get; init; }
+        public Action<IReadOnlyList<CompareItem>>? LoadRequested { get; init; }
+
+        // クエリ方式など取得に時間がかかる場合は、キーの押しっぱなしで要求を連発しない
+        public bool IsRemoteLoading { get; set; }
+
+        private readonly Dictionary<(string DurabilityId, string Pattern), IReadOnlyList<CompareItem>> _seriesCache = new();
 
 
         private double _zoom = 1.0;         // 1.0 = Fit基準
@@ -76,6 +89,9 @@ namespace SampleViewer.Windows
             };
             Loaded += (_, __) => UpdateAllTransforms();
             SizeChanged += (_, __) => UpdateAllTransforms();
+
+            // ウィンドウの大きさが変わったら、画像が最も大きくなる並びに直す
+            TilesGrid.SizeChanged += (_, __) => UpdateGridLayout();
             Closed += (_, __) =>
             {
                 _adjustTimer.Stop();
@@ -86,30 +102,30 @@ namespace SampleViewer.Windows
             };
 
         }
+        private static readonly string[] ImageExtensions = { ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff" };
+
+        // ドラッグ＆ドロップで画像を追加する。表示中のタイルは残し、全体の枚数に合わせて並べ直す
         public void AddImages(IEnumerable<string> paths)
         {
-            Debug.Print($"paths={paths.Count()}");
-            Debug.Print($"tiles={_tiles.Count}");
-
             if (paths == null) return;
-            var n = paths.Count();
-            Debug.Print(n.ToString());
 
-            if (n == 1)
-            { TilesGrid.Rows = 1; TilesGrid.Columns = 1; }
-            if (n >= 2 && n <= 5) { TilesGrid.Rows = 1; TilesGrid.Columns = n; }
-            if (n >= 6 && n <= 10) { TilesGrid.Rows = 2; TilesGrid.Columns = 5; }
-            if (n >= 11 && n <= 20) { TilesGrid.Rows = 5; TilesGrid.Columns = 5; }
-            if (n >= 21 && n <100) { TilesGrid.Rows = (int)(Math.Sqrt(n)+1); TilesGrid.Columns = (int)(Math.Sqrt(n)+1); }
-            if (n >=101) { TilesGrid.Rows = 10; TilesGrid.Columns = 10; }
             var files = paths
+                        .Where(p => ImageExtensions.Contains(System.IO.Path.GetExtension(p).ToLowerInvariant()))
                         .Select(p => new { Path = p, Name = SafeFileName(p) })
                         .Where(x => !_ids.Contains(x.Name))
                         .GroupBy(x => x.Name).Select(g => g.First())
+                        .Take(Math.Max(0, MaxDirectImages - _tiles.Count))
                         .ToList();
 
-            int capacity = Math.Max(0, TilesGrid.Rows*TilesGrid.Columns - _tiles.Count);
-            foreach (var f in files.Take(capacity))
+            if (files.Count == 0)
+            {
+                StatusText.Text = "追加できる画像がありません（同じ名前の画像は追加済みです）";
+                return;
+            }
+
+            SetGridLayout(_tiles.Count + files.Count);
+
+            foreach (var f in files)
             {
                 _ids.Add(f.Name);
                 var tile = CreateTile(new CompareItem { DisplayName = f.Name });
@@ -118,10 +134,86 @@ namespace SampleViewer.Windows
                 _tiles.Add(tile);
                 _ = LoadTileAsync(tile, f.Path, _cts.Token);
             }
+
+            UpdateGridLayout();
+            StatusText.Text = $"{files.Count}枚を追加しました";
         }
 
+        // 並べ方を決めるための寸法
+        private const double DefaultImageAspect = 2550.0 / 3300;   // 画像の幅÷高さ（Letter 縦）
+        private const double TileMargin = 8;                       // タイルの外側の余白（左右・上下の合計）
+        private const double LabelHeightFull = 40;                 // ラベル2行
+        private const double LabelHeightCompact = 24;              // ラベル1行
+        private const double CompactLabelTileWidth = 230;          // これより狭いタイルはラベルを1行にする
 
+        private int _layoutCount;
 
+        private void SetGridLayout(int n)
+        {
+            _layoutCount = n;
+            UpdateGridLayout();
+        }
+
+        // 画像が最も大きく表示される行数と列数にする
+        // ウィンドウの大きさ、画像の縦横比、ラベルの高さから計算するので、枚数が多くても縦長の画像に合った並びになる
+        private void UpdateGridLayout()
+        {
+            int n = _layoutCount;
+
+            if (n <= 0)
+                return;
+
+            // まだ画面に出ていないときは、既定のウィンドウの大きさで見積もる
+            double width = TilesGrid.ActualWidth > 0 ? TilesGrid.ActualWidth : 1570;
+            double height = TilesGrid.ActualHeight > 0 ? TilesGrid.ActualHeight : 880;
+            bool showLabels = CB_ShowLabels.IsChecked == true;
+
+            var loaded = _tiles.Where(x => x.Ready && x.ImgH > 0).ToList();
+            double aspect = loaded.Count > 0 ? loaded.Average(x => (double)x.ImgW / x.ImgH) : DefaultImageAspect;
+
+            var candidates = new List<(int Columns, double ImageHeight, int Empty)>();
+
+            for (int columns = 1; columns <= n; columns++)
+            {
+                int rows = (int)Math.Ceiling((double)n / columns);
+                double tileWidth = width / columns;
+                double labelHeight = !showLabels ? 0
+                    : tileWidth < CompactLabelTileWidth ? LabelHeightCompact
+                    : LabelHeightFull;
+
+                // このタイルに収まる画像の高さ（幅で決まる場合と高さで決まる場合の小さい方）
+                double imageHeight = Math.Min(
+                    (tileWidth - TileMargin) / aspect,
+                    height / rows - TileMargin - labelHeight);
+
+                candidates.Add((columns, imageHeight, rows * columns - n));
+            }
+
+            // 画像が最も大きくなる並び。大きさがほぼ同じ（8%以内）なら、空きマスが少ない並びを優先する
+            double largest = candidates.Max(x => x.ImageHeight);
+
+            int bestColumns = candidates
+                .Where(x => x.ImageHeight >= largest * 0.92)
+                .OrderBy(x => x.Empty)
+                .ThenByDescending(x => x.ImageHeight)
+                .First()
+                .Columns;
+
+            TilesGrid.Columns = bestColumns;
+            TilesGrid.Rows = (int)Math.Ceiling((double)n / bestColumns);
+
+            // 狭いタイルはラベルを1行にして、画像の場所を確保する（2行目の内容はラベルのツールチップで見られる）
+            bool compact = width / bestColumns < CompactLabelTileWidth;
+
+            foreach (var tile in _tiles)
+                SetLabelCompact(tile, compact);
+        }
+
+        private static void SetLabelCompact(Tile tile, bool compact)
+        {
+            if (tile.Label is Panel panel && panel.Children.Count > 1)
+                panel.Children[1].Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        }
 
         // フル読み込み（OnLoad）＋キャンセル対応
         private Task<BitmapImage> LoadBitmapFromFileAsync(
@@ -198,7 +290,7 @@ namespace SampleViewer.Windows
                 Visibility = Visibility.Collapsed
             };
 
-            var label = CreateTileLabel(item, offsetText);
+            var label = CreateTileLabel(item, offsetText, out var pagesText);
             label.Visibility = CB_ShowLabels.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
             DockPanel.SetDock(label, Dock.Top);
 
@@ -255,6 +347,8 @@ namespace SampleViewer.Windows
                 LoadingText = loading,
                 ErrorText = error,
                 Label = label,
+                Item = item,
+                PagesText = pagesText,
                 OffsetText = offsetText,
                 Ready = false
             };
@@ -273,8 +367,10 @@ namespace SampleViewer.Windows
 
         // 画像の上に出す情報ラベル：耐久ID・環境・機種・枚数・パターン／ズレ・評価目的
         // 高さが違うと画像の表示倍率が揃わず位置合わせできないので、全タイルで同じ2行分に固定する（幅が足りない分は切る）
-        private FrameworkElement CreateTileLabel(CompareItem item, TextBlock offsetText)
+        private FrameworkElement CreateTileLabel(CompareItem item, TextBlock offsetText, out TextBlock? pagesText)
         {
+            pagesText = null;
+
             var light = new SolidColorBrush(Color.FromRgb(229, 231, 235));
             var muted = new SolidColorBrush(Color.FromRgb(156, 163, 175));
 
@@ -303,6 +399,27 @@ namespace SampleViewer.Windows
                 return panel;
             }
 
+            if (item.Badge != "")
+            {
+                // 限度見本は橙、比べる対象は青の札
+                firstRow.Children.Add(new Border
+                {
+                    Background = new SolidColorBrush(item.IsLimitSample ? Color.FromRgb(0xF5, 0x9E, 0x0B) : Color.FromRgb(0x3B, 0x6F, 0xE0)),
+                    CornerRadius = new CornerRadius(3),
+                    Height = 16,
+                    Padding = new Thickness(5, 0, 5, 0),
+                    Margin = new Thickness(0, 0, 8, 0),
+                    Child = new TextBlock
+                    {
+                        Text = item.Badge,
+                        FontSize = 10,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = Brushes.White,
+                        VerticalAlignment = VerticalAlignment.Center
+                    }
+                });
+            }
+
             var id = Text(item.DurabilityId, Brushes.White, 0);
             id.FontWeight = FontWeights.SemiBold;
             firstRow.Children.Add(id);
@@ -321,9 +438,9 @@ namespace SampleViewer.Windows
 
             if (item.Pages.HasValue)
             {
-                var pages = Text($"{item.Pages:#,0}枚", Brushes.White);
-                pages.FontWeight = FontWeights.SemiBold;
-                firstRow.Children.Add(pages);
+                pagesText = Text($"{item.Pages:#,0}枚", Brushes.White);
+                pagesText.FontWeight = FontWeights.SemiBold;
+                firstRow.Children.Add(pagesText);
             }
 
             firstRow.Children.Add(Text(item.Pattern, light));
@@ -345,12 +462,21 @@ namespace SampleViewer.Windows
                 var bi = await LoadBitmapFromFileAsync(path, ct);
                 if (ct.IsCancellationRequested) return;
 
+                // 枚数送りで画像が切り替わるときに、調整前の画像が一瞬見えないようにする
+                var adjustment = CurrentAdjustment();
+                BitmapSource? adjusted = adjustment.IsActive
+                    ? await Task.Run(() => ImageAdjuster.Apply(bi, adjustment, ct), ct)
+                    : null;
+                if (ct.IsCancellationRequested) return;
+
                 await Dispatcher.InvokeAsync(() =>
                 {
                     tile.ImgW = Math.Max(1, bi.PixelWidth);
                     tile.ImgH = Math.Max(1, bi.PixelHeight);
 
                     tile.OriginalSource = bi; // ★追加
+                    tile.AdjustedSource = adjusted;
+                    tile.AppliedAdjustment = adjustment;
                     tile.Img.Source = bi;
 
                     tile.Ready = true;
@@ -360,8 +486,8 @@ namespace SampleViewer.Windows
 
                     UpdateTransformFor(tile.Root);
 
-                    // 調整中に読み込まれた画像にも同じ調整を適用する
-                    if (CurrentAdjustment().IsActive)
+                    // 読み込み中に調整が変わっていたら、今の調整を適用し直す
+                    if (tile.AppliedAdjustment != CurrentAdjustment())
                         ScheduleAdjustment();
                 });
 
@@ -372,15 +498,190 @@ namespace SampleViewer.Windows
             }
             catch (Exception ex)
             {
-                Dispatcher.Invoke(() =>
-                {
-                    tile.ErrorText.Text = ex.Message;
-                    tile.ErrorText.Visibility = Visibility.Visible;
-                    tile.LoadingText.Visibility = Visibility.Collapsed;
-                });
+                Dispatcher.Invoke(() => ShowTileError(tile, ex.Message));
             }
         }
 
+
+        // 読み込めなかったタイル。ラベルと違う古い画像を残さないよう消す
+        private void ShowTileError(Tile tile, string message)
+        {
+            tile.Ready = false;
+            tile.OriginalSource = null;
+            tile.AdjustedSource = null;
+            tile.Img.Visibility = Visibility.Collapsed;
+            tile.ErrorText.Text = message;
+            tile.ErrorText.Visibility = Visibility.Visible;
+            tile.LoadingText.Visibility = Visibility.Collapsed;
+        }
+
+        public void ShowImageError(string key, string message)
+        {
+            var tile = FindTile(key);
+
+            if (tile == null)
+                return;
+
+            tile.LoadCts?.Cancel();
+            ShowTileError(tile, $"{message}\n{tile.Item.DisplayName}");
+        }
+
+        #region 枚数送り・コピー
+
+        private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.C && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
+            {
+                CopyView();
+                e.Handled = true;
+                return;
+            }
+
+            if (e.Key != Key.Left && e.Key != Key.Right)
+                return;
+
+            // スライダーやリストでは矢印キーを本来の操作に使う
+            if (Keyboard.FocusedElement is Slider or ComboBox)
+                return;
+
+            e.Handled = true;
+
+            if (e.IsRepeat && IsRemoteLoading)
+                return;
+
+            StepPages(e.Key == Key.Right ? 1 : -1);
+        }
+
+        private void PreviousPages_Click(object sender, RoutedEventArgs e) => StepPages(-1);
+
+        private void NextPages_Click(object sender, RoutedEventArgs e) => StepPages(1);
+
+        // 全タイルを、同じ耐久・同じパターンの前後の枚数へ移動する（ズーム・位置・ズレは維持）
+        private void StepPages(int direction)
+        {
+            if (SeriesProvider == null || LoadRequested == null)
+                return;
+
+            var moved = new List<CompareItem>();
+
+            foreach (var tile in _tiles)
+            {
+                var item = tile.Item;
+
+                if (string.IsNullOrEmpty(item.DurabilityId) || !item.Pages.HasValue)
+                    continue;
+
+                var series = GetSeries(item);
+                var next = direction > 0
+                    ? series.FirstOrDefault(x => x.Pages > item.Pages)
+                    : series.LastOrDefault(x => x.Pages < item.Pages);
+
+                if (next == null)
+                    continue;
+
+                tile.Item = new CompareItem
+                {
+                    Key = tile.Key,
+                    DisplayName = next.DisplayName,
+                    SourcePath = next.SourcePath,
+                    DurabilityId = next.DurabilityId,
+                    Pages = next.Pages,
+                    Pattern = next.Pattern,
+                    Env = next.Env,
+                    Model = next.Model,
+                    Purpose = next.Purpose
+                };
+
+                if (tile.PagesText != null)
+                    tile.PagesText.Text = $"{next.Pages:#,0}枚";
+
+                tile.Label.ToolTip = next.DisplayName;
+                tile.ErrorText.Visibility = Visibility.Collapsed;
+                tile.LoadingText.Text = "読み込み中...";
+                tile.LoadingText.Visibility = Visibility.Visible;
+
+                // 取得に時間がかかる方式では、ラベルと違う古い画像を見せない
+                if (IsRemoteLoading)
+                    tile.Img.Visibility = Visibility.Collapsed;
+
+                moved.Add(tile.Item);
+            }
+
+            StatusText.Text = moved.Count == 0
+                ? (direction > 0 ? "これより後の枚数はありません" : "これより前の枚数はありません")
+                : "";
+
+            if (moved.Count > 0)
+                LoadRequested(moved);
+        }
+
+        private IReadOnlyList<CompareItem> GetSeries(CompareItem item)
+        {
+            var key = (item.DurabilityId, item.Pattern);
+
+            if (!_seriesCache.TryGetValue(key, out var series))
+            {
+                series = SeriesProvider!(item);
+                _seriesCache[key] = series;
+            }
+
+            return series;
+        }
+
+        private void CopyView_Click(object sender, RoutedEventArgs e) => CopyView();
+
+        // ラベルを含む今の表示を、貼り付け先で背景が透けないよう不透明な画像にする
+        private BitmapSource? CreateViewImage()
+        {
+            double width = TilesGrid.ActualWidth;
+            double height = TilesGrid.ActualHeight;
+
+            if (width <= 0 || height <= 0)
+                return null;
+
+            var dpi = VisualTreeHelper.GetDpi(this);
+            var bounds = new Rect(0, 0, width, height);
+
+            var visual = new DrawingVisual();
+            using (var dc = visual.RenderOpen())
+            {
+                dc.DrawRectangle(Brushes.White, null, bounds);
+                dc.DrawRectangle(new VisualBrush(TilesGrid), null, bounds);
+            }
+
+            var bitmap = new RenderTargetBitmap(
+                (int)Math.Ceiling(width * dpi.DpiScaleX),
+                (int)Math.Ceiling(height * dpi.DpiScaleY),
+                dpi.PixelsPerInchX,
+                dpi.PixelsPerInchY,
+                PixelFormats.Pbgra32);
+            bitmap.Render(visual);
+
+            var opaque = new FormatConvertedBitmap(bitmap, PixelFormats.Bgr32, null, 0);
+            opaque.Freeze();
+            return opaque;
+        }
+
+        private void CopyView()
+        {
+            var image = CreateViewImage();
+
+            if (image == null)
+                return;
+
+            try
+            {
+                Clipboard.SetImage(image);
+                StatusText.Text = "表示中の画面をコピーしました";
+            }
+            catch (ExternalException)
+            {
+                // 他のアプリがクリップボードを使用中
+                StatusText.Text = "コピーできませんでした。もう一度お試しください";
+            }
+        }
+
+        #endregion
 
         // パン・ズーム操作
         private void Tile_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
@@ -641,6 +942,9 @@ namespace SampleViewer.Windows
 
             foreach (var tile in _tiles)
                 tile.Label.Visibility = visibility;
+
+            // ラベルの有無で画像に使える高さが変わるので、並びを見直す
+            UpdateGridLayout();
         }
 
         #region 画質調整
@@ -705,6 +1009,10 @@ namespace SampleViewer.Windows
                     if (cts.IsCancellationRequested)
                         return;
 
+                    // 計算中に枚数送りで画像が替わっていたら、古い結果は使わない
+                    if (!ReferenceEquals(tile.OriginalSource, source))
+                        continue;
+
                     tile.AdjustedSource = adjusted;
                     tile.AppliedAdjustment = adjustment;
                     UpdateTransformFor(tile.Root);
@@ -730,35 +1038,7 @@ namespace SampleViewer.Windows
 
             var list = items.ToList();
 
-            int n = list.Count;
-
-            if (n == 1)
-            {
-                TilesGrid.Rows = 1;
-                TilesGrid.Columns = 1;
-            }
-            else if (n >= 2 && n <= 5)
-            {
-                TilesGrid.Rows = 1;
-                TilesGrid.Columns = n;
-            }
-            else if (n >= 6 && n <= 10)
-            {
-                TilesGrid.Rows = 2;
-                TilesGrid.Columns = 5;
-            }
-            else if (n >= 11 && n <= 20)
-            {
-                TilesGrid.Rows = 5;
-                TilesGrid.Columns = 5;
-            }
-            else
-            {
-                int size = (int)Math.Ceiling(Math.Sqrt(n));
-
-                TilesGrid.Rows = size;
-                TilesGrid.Columns = size;
-            }
+            SetGridLayout(list.Count);
 
             foreach (var item in list)
             {
@@ -771,8 +1051,8 @@ namespace SampleViewer.Windows
 
                 tile.LoadingText.Text =
                     string.IsNullOrEmpty(item.DisplayName)
-                    ? "Loading..."
-                    : item.DisplayName;
+                    ? "読み込み中…"
+                    : "読み込み中…\n" + item.DisplayName;
 
                 TilesGrid.Children.Add(tile.Border);
 
@@ -780,6 +1060,8 @@ namespace SampleViewer.Windows
 
                 _ids.Add(item.Key);
             }
+
+            UpdateGridLayout();
         }
 
         // 画像を直接読める場合（Box 等）：ラベル付きのタイルを作ってすぐ読み込む
@@ -803,6 +1085,11 @@ namespace SampleViewer.Windows
             if (tile == null)
                 return;
 
+            // 枚数送りで続けて要求されたら、前の読み込みは取り消す（遅れて届いても上書きしない）
+            tile.LoadCts?.Cancel();
+            var loadCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+            tile.LoadCts = loadCts;
+
             for (int i = 0; i < 5; i++)
             {
                 try
@@ -810,7 +1097,7 @@ namespace SampleViewer.Windows
                     await LoadTileAsync(
                         tile,
                         localImagePath,
-                        _cts.Token);
+                        loadCts.Token);
 
                     return;
                 }
