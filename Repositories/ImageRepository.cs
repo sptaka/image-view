@@ -1,4 +1,4 @@
-﻿using Microsoft.Data.Sqlite;
+using Microsoft.Data.Sqlite;
 using SampleViewer.Models;
 using SampleViewer.Services;
 using System.IO;
@@ -45,9 +45,9 @@ INNER JOIN pattern p
 
     public List<string> GetDistinctValues(string column, Dictionary<string, object> conditions)
     {
-        if (!DisplayFieldMap.ColumnMap.TryGetValue(
+        if (!SearchFields.Columns.TryGetValue(
             column,
-            out string dbColumn))
+            out var dbColumn))
         {
             return new List<string>();
         }
@@ -93,7 +93,7 @@ ORDER BY {dbColumn}
     {
         var filteredConditions = new Dictionary<string, object>(conditions);
 
-        filteredConditions.Remove(Columns.DurabilityId);
+        filteredConditions.Remove(SearchFields.DurabilityId);
 
         var (whereClause, parameters) = SearchConditionBuilder.Build(filteredConditions);
 
@@ -134,6 +134,65 @@ ORDER BY t.taikyu_code
         }
 
         return result;
+    }
+
+    // 1耐久の1パターンの画像を枚数順に返す。同じ枚数に複数あれば画像IDが最も小さい1枚
+    public List<(double Pages, string ImageName)> GetPatternSeries(string taikyuCode, string patternName)
+    {
+        string sql = $@"
+SELECT m.pages, i.image_name, MIN(i.image_id)
+{BaseFromClause}
+WHERE t.taikyu_code = @taikyuCode
+  AND p.pattern_name = @patternName
+  AND m.pages IS NOT NULL
+GROUP BY m.pages
+ORDER BY m.pages
+";
+
+        using var conn = DbHelper.OpenConnection();
+        using var cmd = new SqliteCommand(sql, conn);
+
+        cmd.Parameters.AddWithValue("@taikyuCode", taikyuCode);
+        cmd.Parameters.AddWithValue("@patternName", patternName);
+
+        using var reader = cmd.ExecuteReader();
+
+        var result = new List<(double, string)>();
+
+        while (reader.Read())
+        {
+            result.Add((Convert.ToDouble(reader[0]), reader[1]?.ToString() ?? ""));
+        }
+
+        return result;
+    }
+
+    // 指定した耐久（空なら全耐久）の印字枚数の最小と最大
+    public (double Min, double Max) GetPagesRange(IReadOnlyList<string> taikyuCodes)
+    {
+        var names = taikyuCodes.Select((_, i) => $"@p{i}").ToList();
+
+        string sql = $@"
+SELECT MIN(m.pages), MAX(m.pages)
+FROM measurement m
+INNER JOIN taikyu t
+    ON m.taikyu_id = t.taikyu_id
+WHERE m.pages IS NOT NULL
+{(names.Count > 0 ? $"AND t.taikyu_code IN ({string.Join(",", names)})" : "")}
+";
+
+        using var conn = DbHelper.OpenConnection();
+        using var cmd = new SqliteCommand(sql, conn);
+
+        for (int i = 0; i < names.Count; i++)
+            cmd.Parameters.AddWithValue(names[i], taikyuCodes[i]);
+
+        using var reader = cmd.ExecuteReader();
+
+        if (!reader.Read() || reader.IsDBNull(0))
+            return (0, 0);
+
+        return (Convert.ToDouble(reader[0]), Convert.ToDouble(reader[1]));
     }
 
     // 耐久IDごとの環境・機種（メーカー＋機種名）・評価目的
@@ -216,21 +275,21 @@ FROM measurement
         var (whereClause, parameters) = SearchConditionBuilder.Build(conditions);
 
         string col1 =
-            DisplayFieldMap.ColumnMap.TryGetValue(
+            DisplayFieldRepository.TryGetColumn(
                 label1,
                 out var c1)
             ? c1
             : "''";
 
         string col2 =
-            DisplayFieldMap.ColumnMap.TryGetValue(
+            DisplayFieldRepository.TryGetColumn(
                 label2,
                 out var c2)
             ? c2
             : "''";
 
         string col3 =
-            DisplayFieldMap.ColumnMap.TryGetValue(
+            DisplayFieldRepository.TryGetColumn(
                 label3,
                 out var c3)
             ? c3
@@ -246,7 +305,8 @@ SELECT
     {col2},
     {col3},
     m.pages,
-    m.measurement_id
+    m.measurement_id,
+    p.color
 {BaseFromClause}
 WHERE 1=1
 {whereClause}
@@ -340,7 +400,10 @@ LIMIT @limit
                     MeasurementId =
                         reader.IsDBNull(8)
                             ? 0
-                            : Convert.ToInt64(reader[8])
+                            : Convert.ToInt64(reader[8]),
+
+                    Color =
+                        reader[9]?.ToString() ?? ""
                 });
         }
 
